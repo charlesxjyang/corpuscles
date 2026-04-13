@@ -82,11 +82,20 @@ function App() {
 
         // Inject data arrays based on analysis type
         if (['circuit_fit', 'kramers_kronig', 'drt_simple', 'drt_bayesian', 'drt_bht'].includes(type)) {
+          const freq = d.frequency_hz;
+          const zr = d.z_real_ohm;
+          const zi = d.z_imag_ohm;
+          if (!freq || !zr || !zi || (freq as unknown[]).length === 0) {
+            throw new Error(
+              `Dataset "${ds.filename}" has no EIS data (missing frequency_hz, z_real_ohm, or z_imag_ohm). ` +
+              `Available columns: ${ds.data.columns.join(', ')}`
+            );
+          }
           fullParams = {
             ...fullParams,
-            frequency: d.frequency_hz,
-            z_real: d.z_real_ohm,
-            z_imag: d.z_imag_ohm,
+            frequency: freq,
+            z_real: zr,
+            z_imag: zi,
           };
         }
         if (type === 'dqdv') {

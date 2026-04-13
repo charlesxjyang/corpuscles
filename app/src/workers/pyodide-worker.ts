@@ -176,11 +176,32 @@ def parse_biologic_mpt(filepath):
 def _normalize_biologic_columns(df):
     rename = {k: v for k, v in _BIOLOGIC_COL_MAP.items() if k in df.columns}
     df = df.rename(columns=rename)
-    if "current_ma" in df.columns:
+    # Fuzzy fallback: match columns by pattern if exact match failed
+    _FUZZY_MAP = {
+        "frequency_hz": ["freq", "f/hz", "f_hz", "frequency"],
+        "z_real_ohm": ["re(z)", "z_real", "zreal", "z'", "z_re"],
+        "z_imag_neg_ohm": ["-im(z)", "-z_imag", "-z''", "-zimag"],
+        "z_imag_ohm": ["im(z)", "z_imag", "zimag", "z''", "z_im"],
+        "z_mag_ohm": ["|z|", "z_mag", "zmod"],
+        "z_phase_deg": ["phase(z)", "z_phase", "zphz"],
+        "voltage_v": ["ewe", "voltage", "potential", "e/v", "e_we"],
+        "current_ma": ["<i>/ma", "i/ma", "current"],
+        "time_s": ["time/s", "time", "t/s"],
+        "cycle_number": ["cycle", "cyc"],
+    }
+    for target, patterns in _FUZZY_MAP.items():
+        if target in df.columns:
+            continue
+        for col in df.columns:
+            cl = col.lower().strip()
+            if any(p in cl for p in patterns):
+                df = df.rename(columns={col: target})
+                break
+    if "current_ma" in df.columns and "current_a" not in df.columns:
         df["current_a"] = df["current_ma"] / 1000.0
-    if "capacity_mah" in df.columns:
+    if "capacity_mah" in df.columns and "capacity_ah" not in df.columns:
         df["capacity_ah"] = df["capacity_mah"] / 1000.0
-    if "z_imag_neg_ohm" in df.columns:
+    if "z_imag_neg_ohm" in df.columns and "z_imag_ohm" not in df.columns:
         df["z_imag_ohm"] = -df["z_imag_neg_ohm"]
     if "cycle_number" not in df.columns and "half_cycle" in df.columns:
         df["cycle_number"] = (df["half_cycle"] + 1) // 2
