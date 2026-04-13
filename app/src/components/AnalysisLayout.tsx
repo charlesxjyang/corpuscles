@@ -17,7 +17,7 @@ export function AnalysisLayout({
     <div style={{
       display: 'flex',
       flex: 1,
-      overflow: 'hidden',
+      minHeight: 0,
       height: '100%',
     }}>
       {/* Settings panel (left) */}
@@ -40,7 +40,8 @@ export function AnalysisLayout({
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
+        minHeight: 0,
+        overflow: 'auto',
       }}>
         {/* Results table */}
         <div style={{

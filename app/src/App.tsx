@@ -1,5 +1,14 @@
 import { useState, useCallback } from 'react';
 import { usePyodide } from './hooks/usePyodide';
+
+const API_URL = import.meta.env.VITE_API_URL || 'https://api-production-3527.up.railway.app';
+
+// Analysis types that require server-side libraries (impedance.py, pyDRTtools)
+const SERVER_ANALYSIS_TYPES = new Set([
+  'circuit_fit', 'kramers_kronig',
+  'drt_simple', 'drt_bayesian', 'drt_bht', 'drt_peak',
+  'simulate_circuit',
+]);
 import { WorkflowTabs } from './components/WorkflowTabs';
 import { DataTab } from './components/tabs/DataTab';
 import { KramersKronigTab } from './components/tabs/KramersKronigTab';
@@ -87,7 +96,23 @@ function App() {
           fullParams = { ...fullParams, data: d };
         }
 
-        const result = await analyze(type, fullParams);
+        let result;
+        if (SERVER_ANALYSIS_TYPES.has(type)) {
+          // Route to Railway API for impedance.py / pyDRTtools analysis
+          const resp = await fetch(`${API_URL}/api/v1/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type, params: fullParams }),
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+            throw new Error(err.detail || `Server error: ${resp.status}`);
+          }
+          result = await resp.json();
+        } else {
+          // Client-side via Pyodide (dqdv, capacity_per_cycle, etc.)
+          result = await analyze(type, fullParams);
+        }
         const analysisResult: AnalysisResult = {
           id: `ar_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           datasetId,
@@ -173,7 +198,7 @@ function App() {
       )}
 
       {/* Tab content */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
         {activeTab === 'data' && (
           <DataTab
             datasets={datasets}

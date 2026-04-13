@@ -49,11 +49,11 @@ export function DataTab({ datasets, onFileDrop, onToggle, onRemove, pyodideReady
   );
 
   return (
-    <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
       <aside style={{ width: 280, flexShrink: 0, borderRight: '1px solid #e5e7eb', backgroundColor: 'white', overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         {settings}
       </aside>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ borderBottom: '1px solid #e5e7eb', overflow: 'auto', maxHeight: '35%', backgroundColor: 'white' }}>
           {results}
         </div>
