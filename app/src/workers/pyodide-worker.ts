@@ -58,8 +58,17 @@ _NEWARE_COL_MAP = {
 
 def detect_file_type(filename, content_bytes):
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext == "mpr": return "biologic_mpr"
-    if ext == "mpt": return "biologic_mpt"
+    if ext in ("mpr", "mpt"):
+        # Check magic bytes: ASCII exports start with "EC-Lab" even if saved as .mpr
+        try:
+            header = content_bytes[:32].decode("latin-1", errors="replace")
+        except:
+            header = ""
+        if header.startswith("EC-Lab") or header.startswith("BT-Lab"):
+            return "biologic_mpt"
+        if ext == "mpt":
+            return "biologic_mpt"
+        return "biologic_mpr"
     if ext == "nda": return "neware_nda"
     if ext == "ndax": return "neware_ndax"
     if ext == "dta": return "gamry_dta"
@@ -106,6 +115,65 @@ def parse_biologic_mpr(filepath):
     mpr = BioLogic.MPRfile(filepath)
     data = mpr.data
     df = pd.DataFrame({name: data[name] for name in data.dtype.names})
+    df = _normalize_biologic_columns(df)
+    meta = {}
+    if hasattr(mpr, "timestamp"):
+        meta["timestamp"] = str(mpr.timestamp)
+    return df, meta
+
+
+def parse_biologic_mpt(filepath):
+    # EC-Lab ASCII export: header lines starting with metadata, then tab-separated data
+    meta = {}
+    with open(filepath, "r", encoding="latin-1") as f:
+        lines = f.readlines()
+    # Find "Nb header lines" to know where data starts
+    n_header = 0
+    for line in lines[:5]:
+        if "Nb header lines" in line:
+            parts = line.split(":")
+            if len(parts) >= 2:
+                n_header = int(parts[-1].strip())
+            break
+    if n_header == 0:
+        # Fallback: find first line that looks like column headers (tab-separated)
+        for i, line in enumerate(lines):
+            if "\\t" in line and not line.startswith("EC-Lab") and not line.startswith("BT-Lab"):
+                n_header = i
+                break
+    # Extract metadata from header
+    for line in lines[:n_header]:
+        if ":" in line and not line.startswith("EC-Lab") and not line.startswith("BT-Lab"):
+            parts = line.split(":", 1)
+            key = parts[0].strip()
+            val = parts[1].strip() if len(parts) > 1 else ""
+            if key and val and key != "Nb header lines":
+                meta[key] = val
+    # Parse data: header line is at n_header-1, data starts at n_header
+    if n_header > 0 and n_header <= len(lines):
+        header_line = lines[n_header - 1].strip()
+        columns = [c.strip() for c in header_line.split("\\t")]
+        data_lines = []
+        for line in lines[n_header:]:
+            parts = line.strip().split("\\t")
+            if len(parts) == len(columns):
+                try:
+                    row = [float(p) for p in parts]
+                    data_lines.append(row)
+                except ValueError:
+                    continue
+        if data_lines:
+            df = pd.DataFrame(data_lines, columns=columns)
+        else:
+            df = pd.DataFrame()
+    else:
+        # Try pandas fallback
+        df = pd.read_csv(filepath, sep="\\t", encoding="latin-1", skiprows=n_header if n_header > 0 else 0)
+    df = _normalize_biologic_columns(df)
+    return df, meta
+
+
+def _normalize_biologic_columns(df):
     rename = {k: v for k, v in _BIOLOGIC_COL_MAP.items() if k in df.columns}
     df = df.rename(columns=rename)
     if "current_ma" in df.columns:
@@ -116,10 +184,7 @@ def parse_biologic_mpr(filepath):
         df["z_imag_ohm"] = -df["z_imag_neg_ohm"]
     if "cycle_number" not in df.columns and "half_cycle" in df.columns:
         df["cycle_number"] = (df["half_cycle"] + 1) // 2
-    meta = {}
-    if hasattr(mpr, "timestamp"):
-        meta["timestamp"] = str(mpr.timestamp)
-    return df, meta
+    return df
 
 
 def parse_neware(filepath):
@@ -273,7 +338,7 @@ def parse_generic_csv(filepath):
 
 PARSERS = {
     "biologic_mpr": parse_biologic_mpr,
-    "biologic_mpt": parse_biologic_mpr,
+    "biologic_mpt": parse_biologic_mpt,
     "neware_nda": parse_neware,
     "neware_ndax": parse_neware,
     "gamry_dta": parse_gamry_dta,
