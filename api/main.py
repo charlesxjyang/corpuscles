@@ -154,6 +154,9 @@ async def run_analysis(req: AnalysisRequest):
         zr = np.array(params.get("z_real", []), dtype=float)
         zi = np.array(params.get("z_imag", []), dtype=float)
 
+        if len(freq) == 0 or len(zr) == 0 or len(zi) == 0:
+            raise ValueError("Empty data arrays. Make sure the dataset contains EIS data (frequency, z_real, z_imag).")
+
         # Ensure frequency is sorted (some libraries require ascending)
         if len(freq) > 1 and freq[0] > freq[-1]:
             freq = freq[::-1]
