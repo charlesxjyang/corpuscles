@@ -15,7 +15,6 @@ RUN python /tmp/patch_pydrt.py && rm /tmp/patch_pydrt.py
 COPY python/echem_parse /app/echem_parse
 COPY api/main.py /app/main.py
 
-ENV PORT=8080
 EXPOSE 8080
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
