@@ -9,8 +9,8 @@ WORKDIR /app
 COPY api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY api/patch_pydrt.py /tmp/patch_pydrt.py
-RUN python /tmp/patch_pydrt.py && rm /tmp/patch_pydrt.py
+COPY api/patch_pydrt.py api/patch_impedance.py /tmp/
+RUN python /tmp/patch_pydrt.py && python /tmp/patch_impedance.py && rm /tmp/patch_pydrt.py /tmp/patch_impedance.py
 
 COPY python/echem_parse /app/echem_parse
 COPY api/main.py /app/main.py
