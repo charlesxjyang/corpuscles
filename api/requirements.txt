@@ -11,11 +11,20 @@ asyncpg==0.30.0
 # Permalink ID generation
 nanoid==2.0.0
 
-# EIS analysis (core — these pull in numpy, scipy, pandas as transitive deps)
-impedance                # Circuit fitting, KK validation, file parsing
-pyDRTtools               # DRT analysis (Tikhonov, Bayesian, BHT)
-galvani                  # Biologic .mpr file parsing
+# Scientific computing (used directly by echem_parse)
+numpy
+pandas
+scipy
+matplotlib
 
-# pyDRTtools transitive deps that need explicit install
-cvxopt                   # Convex optimization solver for DRT
-scikit-learn             # Used by pyDRTtools parameter selection
+# EIS analysis libraries
+impedance
+pyDRTtools
+galvani
+
+# pyDRTtools dependencies that pip doesn't auto-resolve
+cvxopt
+scikit-learn
+
+# galvani dependency
+openpyxl
