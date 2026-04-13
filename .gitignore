@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+vendor/
+test_data/
+*.egg-info/
+.DS_Store

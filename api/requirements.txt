@@ -1,0 +1,16 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+sqlalchemy[asyncio]==2.0.41
+asyncpg==0.30.0
+alembic==1.15.2
+pydantic==2.11.4
+python-multipart==0.0.20
+nanoid==2.0.0
+numpy
+scipy
+pandas
+galvani
+impedance
+pyDRTtools
+cvxopt
+scikit-learn
