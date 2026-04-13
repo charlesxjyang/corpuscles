@@ -295,7 +295,10 @@ async def run_analysis(req: AnalysisRequest):
             raise HTTPException(status_code=400, detail=f"Unknown analysis type: {req.type}")
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        tb = traceback.format_exc()
+        print(f"Analysis error: {tb}", flush=True)
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
 
 # ---- File upload + parse endpoint ----
