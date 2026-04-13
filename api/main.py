@@ -1,17 +1,10 @@
 """Corpuscles API — Electrochemical Impedance Analysis with permalink sharing."""
 
 import os
-import sys
 import json
-import types
 import tempfile
 from datetime import datetime
 from typing import Optional
-
-# Mock PyQt5 before any pyDRTtools imports can happen
-for _mod in ['PyQt5', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'PyQt5.QtCore']:
-    if _mod not in sys.modules:
-        sys.modules[_mod] = types.ModuleType(_mod)
 
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -349,4 +342,11 @@ async def parse_file(file: UploadFile = File(...)):
 
 @app.get("/api/v1/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    imports = {}
+    for mod in ["numpy", "pandas", "scipy", "galvani", "impedance"]:
+        try:
+            __import__(mod)
+            imports[mod] = "ok"
+        except Exception as e:
+            imports[mod] = str(e)
+    return {"status": "ok", "version": "0.1.0", "imports": imports, "np_available": "np" in dir()}
