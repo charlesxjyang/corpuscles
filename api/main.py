@@ -1,10 +1,17 @@
 """Corpuscles API — Electrochemical Impedance Analysis with permalink sharing."""
 
 import os
+import sys
 import json
+import types
 import tempfile
 from datetime import datetime
 from typing import Optional
+
+# Mock PyQt5 before any pyDRTtools imports can happen
+for _mod in ['PyQt5', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'PyQt5.QtCore']:
+    if _mod not in sys.modules:
+        sys.modules[_mod] = types.ModuleType(_mod)
 
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -148,19 +155,17 @@ async def get_share(share_id: str):
 @app.post("/api/v1/analyze")
 async def run_analysis(req: AnalysisRequest):
     """Run EIS analysis server-side using impedance.py and pyDRTtools."""
-    import sys
-    import types
-
-    # Mock PyQt5 for pyDRTtools import
-    for mod in ['PyQt5', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'PyQt5.QtCore']:
-        if mod not in sys.modules:
-            sys.modules[mod] = types.ModuleType(mod)
-
     try:
         params = req.params
-        freq = np.array(params.get("frequency", []))
-        zr = np.array(params.get("z_real", []))
-        zi = np.array(params.get("z_imag", []))
+        freq = np.array(params.get("frequency", []), dtype=float)
+        zr = np.array(params.get("z_real", []), dtype=float)
+        zi = np.array(params.get("z_imag", []), dtype=float)
+
+        # Ensure frequency is sorted (some libraries require ascending)
+        if len(freq) > 1 and freq[0] > freq[-1]:
+            freq = freq[::-1]
+            zr = zr[::-1]
+            zi = zi[::-1]
 
         if req.type == "circuit_fit":
             from impedance.models.circuits import CustomCircuit
