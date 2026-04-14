@@ -6,12 +6,13 @@ import type { Dataset, AnalysisResult } from '../../types';
 const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
 
 const PRESET_CIRCUITS = [
-  { label: 'Randles', value: 'R0-p(R1,C1)-W1', guess: [100, 1000, 1e-6, 500] },
-  { label: 'Randles + CPE', value: 'R0-p(R1,CPE1)-W1', guess: [100, 1000, 1e-5, 0.8, 500] },
-  { label: 'R-RC', value: 'R0-p(R1,C1)', guess: [100, 1000, 1e-6] },
-  { label: 'R-RC-RC', value: 'R0-p(R1,C1)-p(R2,C2)', guess: [10, 50, 1e-6, 100, 1e-3] },
-  { label: 'R-Zarc', value: 'R0-Zarc1', guess: [100, 1000, 0.01, 0.8] },
-  { label: 'Custom', value: '', guess: [] },
+  { label: 'Auto (best fit)', value: '__auto__', guess: [] },
+  { label: 'Randles + CPE', value: 'R0-p(R1,CPE1)-W1', guess: [] },
+  { label: 'R-CPE', value: 'R0-p(R1,CPE1)', guess: [] },
+  { label: 'Randles', value: 'R0-p(R1,C1)-W1', guess: [] },
+  { label: 'R-RC', value: 'R0-p(R1,C1)', guess: [] },
+  { label: 'R-RC-RC', value: 'R0-p(R1,C1)-p(R2,C2)', guess: [] },
+  { label: 'Custom', value: '__custom__', guess: [] },
 ];
 
 interface Props {
@@ -24,9 +25,12 @@ interface Props {
 export function FittingTab({ datasets, results, onAnalyze, analyzing }: Props) {
   const [selectedDataset, setSelectedDataset] = useState<string>(datasets[0]?.id ?? '');
   const [presetIdx, setPresetIdx] = useState(0);
-  const [circuitString, setCircuitString] = useState(PRESET_CIRCUITS[0].value);
-  const [initialGuess, setInitialGuess] = useState(PRESET_CIRCUITS[0].guess.join(', '));
+  const [circuitString, setCircuitString] = useState('');
+  const [initialGuess, setInitialGuess] = useState('');
   const [globalOpt, setGlobalOpt] = useState(false);
+
+  const isAuto = PRESET_CIRCUITS[presetIdx].value === '__auto__';
+  const isCustom = PRESET_CIRCUITS[presetIdx].value === '__custom__';
 
   const eisDatasets = datasets.filter(d => d.data.experimentType === 'eis' && d.visible);
   const fitResults = results.filter(r => r.type === 'circuit_fit' && r.status === 'completed');
@@ -34,20 +38,23 @@ export function FittingTab({ datasets, results, onAnalyze, analyzing }: Props) {
   const handlePresetChange = (idx: number) => {
     setPresetIdx(idx);
     const p = PRESET_CIRCUITS[idx];
-    if (p.value) {
+    if (p.value !== '__auto__' && p.value !== '__custom__') {
       setCircuitString(p.value);
-      setInitialGuess(p.guess.join(', '));
     }
   };
 
   const handleRun = () => {
-    if (!selectedDataset || !circuitString) return;
+    if (!selectedDataset) return;
     const guess = initialGuess.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
-    onAnalyze(selectedDataset, 'circuit_fit', {
-      circuit_string: circuitString,
-      initial_guess: guess.length > 0 ? guess : undefined,
+    const fitParams: Record<string, unknown> = {
+      auto_fit: isAuto,
       global_opt: globalOpt,
-    });
+    };
+    if (!isAuto) {
+      fitParams.circuit_string = isCustom ? circuitString : PRESET_CIRCUITS[presetIdx].value;
+      if (guess.length > 0) fitParams.initial_guess = guess;
+    }
+    onAnalyze(selectedDataset, 'circuit_fit', fitParams);
   };
 
   const settings = (
@@ -58,40 +65,50 @@ export function FittingTab({ datasets, results, onAnalyze, analyzing }: Props) {
       </select>
 
       <SectionHeader>Circuit</SectionHeader>
-      <Label label="Preset">
+      <Label label="Mode">
         <select value={presetIdx} onChange={e => handlePresetChange(Number(e.target.value))} style={selectStyle}>
           {PRESET_CIRCUITS.map((p, i) => <option key={i} value={i}>{p.label}</option>)}
         </select>
       </Label>
-      <Label label="Circuit string (CDC)">
-        <input
-          type="text"
-          value={circuitString}
-          onChange={e => setCircuitString(e.target.value)}
-          placeholder="R0-p(R1,C1)-W1"
-          style={{ ...selectStyle, fontFamily: 'monospace' }}
-        />
-      </Label>
-      <div style={{ fontSize: '0.72rem', color: '#9ca3af' }}>
-        Elements: R, C, L, W, Wo, Ws, CPE, Zarc, TLMQ
-        <br />Series: - &nbsp; Parallel: p(X,Y)
-      </div>
-
-      <Label label="Initial guess (comma-separated)">
-        <input
-          type="text"
-          value={initialGuess}
-          onChange={e => setInitialGuess(e.target.value)}
-          style={{ ...selectStyle, fontFamily: 'monospace', fontSize: '0.78rem' }}
-        />
-      </Label>
+      {isAuto && (
+        <div style={{ fontSize: '0.75rem', color: '#6b7280', padding: '0.3rem', backgroundColor: '#f0f9ff', borderRadius: 4 }}>
+          Tries R-CPE, Randles, Randles+CPE, R-RC, R-RC-RC and picks the best fit automatically.
+        </div>
+      )}
+      {!isAuto && (
+        <>
+          <Label label="Circuit string (CDC)">
+            <input
+              type="text"
+              value={isCustom ? circuitString : PRESET_CIRCUITS[presetIdx].value}
+              onChange={e => setCircuitString(e.target.value)}
+              readOnly={!isCustom}
+              placeholder="R0-p(R1,CPE1)-W1"
+              style={{ ...selectStyle, fontFamily: 'monospace', backgroundColor: isCustom ? 'white' : '#f3f4f6' }}
+            />
+          </Label>
+          <div style={{ fontSize: '0.72rem', color: '#9ca3af' }}>
+            Elements: R, C, L, W, Wo, Ws, CPE, Zarc, TLMQ
+            <br />Series: - &nbsp; Parallel: p(X,Y)
+          </div>
+          <Label label="Initial guess (leave blank for auto)">
+            <input
+              type="text"
+              value={initialGuess}
+              onChange={e => setInitialGuess(e.target.value)}
+              placeholder="auto-estimated from data"
+              style={{ ...selectStyle, fontFamily: 'monospace', fontSize: '0.78rem' }}
+            />
+          </Label>
+        </>
+      )}
 
       <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#374151' }}>
         <input type="checkbox" checked={globalOpt} onChange={e => setGlobalOpt(e.target.checked)} />
         Global optimization (slower, avoids local minima)
       </label>
 
-      <button onClick={handleRun} disabled={analyzing || !selectedDataset || !circuitString} style={primaryBtnStyle}>
+      <button onClick={handleRun} disabled={analyzing || !selectedDataset} style={primaryBtnStyle}>
         {analyzing ? 'Fitting...' : 'Fit Circuit'}
       </button>
     </>
@@ -124,7 +141,8 @@ function FitParamsTable({ result, datasets }: { result: AnalysisResult; datasets
   return (
     <div>
       <div style={{ fontSize: '0.78rem', color: '#6b7280', marginBottom: '0.3rem' }}>
-        {ds?.filename} | {d.circuit_string as string} | RMSE: {((d.residual_rmse as number) * 100).toFixed(1)}%
+        {ds?.filename} | <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{d.circuit_string as string}</span>
+        {d.auto_fit ? ' (auto-selected)' : ''} | RMSE: {((d.residual_rmse as number) * 100).toFixed(1)}%
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
         <thead>

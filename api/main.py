@@ -166,21 +166,58 @@ async def run_analysis(req: AnalysisRequest):
         if req.type == "circuit_fit":
             from impedance.models.circuits import CustomCircuit
             Z = zr + 1j * zi
-            circuit_str = params.get("circuit_string", "R0-p(R1,C1)-W1")
+            circuit_str = params.get("circuit_string", "")
             guess = params.get("initial_guess")
             constants = params.get("constants", {})
             global_opt = params.get("global_opt", False)
+            auto_fit = params.get("auto_fit", not circuit_str)
 
-            if guess is None:
-                guess = [np.min(zr), np.max(zr) - np.min(zr), 1e-6, np.max(zr)]
+            # Smart initial guess estimation from data
+            R_hf = float(zr[np.argmax(freq)])   # high-freq real intercept
+            R_lf = float(zr[np.argmin(freq)])   # low-freq real intercept
+            R_ct = max(R_lf - R_hf, R_hf * 0.1)  # charge transfer resistance
+            omega_peak = 2 * np.pi * freq[np.argmax(-zi)]  # freq at max -Z_imag
+            C_est = 1.0 / (omega_peak * R_ct) if omega_peak > 0 and R_ct > 0 else 1e-6
+            W_est = R_ct * 0.5
 
-            circuit = CustomCircuit(circuit_str, initial_guess=guess, constants=constants)
-            circuit.fit(freq, Z, global_opt=global_opt)
+            if auto_fit:
+                # Try multiple common circuits, pick best fit
+                candidates = [
+                    ("R0-p(R1,CPE1)", [R_hf, R_ct, C_est * 10, 0.8]),
+                    ("R0-p(R1,C1)-W1", [R_hf, R_ct, C_est, W_est]),
+                    ("R0-p(R1,CPE1)-W1", [R_hf, R_ct, C_est * 10, 0.8, W_est]),
+                    ("R0-p(R1,C1)", [R_hf, R_ct, C_est]),
+                    ("R0-p(R1,C1)-p(R2,C2)", [R_hf, R_ct * 0.5, C_est, R_ct * 0.5, C_est * 100]),
+                ]
+                best = None
+                best_rmse = float("inf")
+                for cstr, cguess in candidates:
+                    try:
+                        c = CustomCircuit(cstr, initial_guess=cguess)
+                        c.fit(freq, Z)
+                        Z_f = c.predict(freq)
+                        rmse = float(np.sqrt(np.mean(np.abs(Z - Z_f) ** 2)) / np.mean(np.abs(Z)))
+                        if rmse < best_rmse:
+                            best_rmse = rmse
+                            best = (c, cstr, Z_f, rmse)
+                    except Exception:
+                        continue
+                if best is None:
+                    raise ValueError("Auto-fit failed: no circuit converged")
+                circuit, circuit_str, Z_fit, residual = best
+            else:
+                if not circuit_str:
+                    circuit_str = "R0-p(R1,CPE1)"
+                if guess is None:
+                    # Estimate based on circuit elements
+                    n_params = circuit_str.count("R") + circuit_str.count("C") + circuit_str.count("W") + circuit_str.count("CPE") * 2 + circuit_str.count("L")
+                    guess = [R_hf, R_ct, C_est, 0.8, W_est, 1e-7][:n_params]
+                circuit = CustomCircuit(circuit_str, initial_guess=guess, constants=constants)
+                circuit.fit(freq, Z, global_opt=global_opt)
+                Z_fit = circuit.predict(freq)
+                residual = float(np.sqrt(np.mean(np.abs(Z - Z_fit) ** 2)) / np.mean(np.abs(Z)))
 
             names, units = circuit.get_param_names()
-            Z_fit = circuit.predict(freq)
-            residual = float(np.sqrt(np.mean(np.abs(Z - Z_fit) ** 2)) / np.mean(np.abs(Z)))
-
             return {
                 "type": "circuit_fit",
                 "data": {
@@ -192,6 +229,7 @@ async def run_analysis(req: AnalysisRequest):
                     "z_fit_imag": Z_fit.imag.tolist(),
                     "residual_rmse": residual,
                     "circuit_string": circuit_str,
+                    "auto_fit": auto_fit,
                 },
             }
 
