@@ -209,9 +209,27 @@ async def run_analysis(req: AnalysisRequest):
                 if not circuit_str:
                     circuit_str = "R0-p(R1,CPE1)"
                 if guess is None:
-                    # Estimate based on circuit elements
-                    n_params = circuit_str.count("R") + circuit_str.count("C") + circuit_str.count("W") + circuit_str.count("CPE") * 2 + circuit_str.count("L")
-                    guess = [R_hf, R_ct, C_est, 0.8, W_est, 1e-7][:n_params]
+                    # Build guess from circuit elements
+                    elements = []
+                    for elem in ['R', 'C', 'L', 'W']:
+                        elements.extend([elem] * circuit_str.count(elem))
+                    # CPE has 2 params, Wo/Ws have 2, Zarc has 3
+                    n_cpe = circuit_str.count("CPE")
+                    n_wo = circuit_str.count("Wo") + circuit_str.count("Ws")
+                    n_zarc = circuit_str.count("Zarc")
+                    n_r = circuit_str.count("R") - circuit_str.count("Zarc")  # Zarc includes R
+                    n_c = circuit_str.count("C") - circuit_str.count("CPE")  # CPE includes C
+                    n_w = circuit_str.count("W") - circuit_str.count("Wo") - circuit_str.count("Ws")
+                    n_l = circuit_str.count("L") - circuit_str.count("La")
+                    param_pool = []
+                    for _ in range(max(n_r, 0)): param_pool.append(R_hf if len(param_pool) == 0 else R_ct)
+                    for _ in range(max(n_c, 0)): param_pool.append(C_est)
+                    for _ in range(max(n_l, 0)): param_pool.append(1e-7)
+                    for _ in range(max(n_w, 0)): param_pool.append(W_est)
+                    for _ in range(max(n_cpe, 0)): param_pool.extend([C_est * 10, 0.8])
+                    for _ in range(max(n_wo, 0)): param_pool.extend([W_est, R_ct * C_est])
+                    for _ in range(max(n_zarc, 0)): param_pool.extend([R_ct, R_ct * C_est, 0.8])
+                    guess = param_pool if param_pool else [R_hf, R_ct, C_est, 0.8]
                 circuit = CustomCircuit(circuit_str, initial_guess=guess, constants=constants)
                 circuit.fit(freq, Z, global_opt=global_opt)
                 Z_fit = circuit.predict(freq)
@@ -358,7 +376,10 @@ async def run_analysis(req: AnalysisRequest):
 async def parse_file(file: UploadFile = File(...)):
     """Parse an uploaded electrochemistry data file server-side."""
     import sys
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
+    # Support both local dev (python/echem_parse) and Docker (/app/echem_parse)
+    for p in [os.path.join(os.path.dirname(__file__), "..", "python"), os.path.dirname(__file__)]:
+        if p not in sys.path:
+            sys.path.insert(0, p)
     from echem_parse import load
 
     with tempfile.NamedTemporaryFile(suffix=f"_{file.filename}", delete=False) as tmp:
