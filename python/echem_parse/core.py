@@ -69,10 +69,17 @@ def detect_file_type(filepath: str, content: Optional[bytes] = None) -> FileType
         with open(filepath, "rb") as f:
             content = f.read(2048)
 
-    if ext == "mpr":
+    if ext in ("mpr", "mpt"):
+        # Check magic bytes: ASCII exports start with "EC-Lab" or "BT-Lab"
+        try:
+            header = content[:32].decode("latin-1", errors="replace")
+        except Exception:
+            header = ""
+        if header.startswith("EC-Lab") or header.startswith("BT-Lab"):
+            return FileType.BIOLOGIC_MPT
+        if ext == "mpt":
+            return FileType.BIOLOGIC_MPT
         return FileType.BIOLOGIC_MPR
-    if ext == "mpt":
-        return FileType.BIOLOGIC_MPT
     if ext == "nda":
         return FileType.NEWARE_NDA
     if ext == "ndax":
@@ -226,17 +233,84 @@ def _parse_biologic_mpr(filepath: str) -> ParseResult:
 # ---------------------------------------------------------------------------
 
 def _parse_biologic_mpt(filepath: str) -> ParseResult:
-    from galvani import BioLogic
+    """Parse Biologic EC-Lab ASCII text export (.mpt or .mpr saved as text)."""
+    metadata = {}
+    with open(filepath, "r", encoding="latin-1") as f:
+        lines = f.readlines()
 
-    mpt = BioLogic.MPTfile(filepath)
-    df = pd.DataFrame(mpt.data) if hasattr(mpt, 'data') else pd.DataFrame()
+    # Find "Nb header lines" to know where data starts
+    n_header = 0
+    for line in lines[:10]:
+        if "Nb header lines" in line:
+            parts = line.split(":")
+            if len(parts) >= 2:
+                try:
+                    n_header = int(parts[-1].strip())
+                except ValueError:
+                    pass
+            break
+
+    if n_header == 0:
+        # Fallback: find first tab-separated line that looks like column headers
+        for i, line in enumerate(lines):
+            if "\t" in line and not line.startswith("EC-Lab") and not line.startswith("BT-Lab"):
+                n_header = i
+                break
+
+    # Extract metadata from header
+    for line in lines[:n_header]:
+        if ":" in line and not line.startswith("EC-Lab") and not line.startswith("BT-Lab") and not line.startswith("Nb header"):
+            parts = line.split(":", 1)
+            key = parts[0].strip()
+            val = parts[1].strip() if len(parts) > 1 else ""
+            if key and val:
+                metadata[key] = val
+
+    # Parse data
+    if n_header > 0 and n_header < len(lines):
+        header_line = lines[n_header - 1].strip()
+        columns = [c.strip() for c in header_line.split("\t")]
+        data_lines = []
+        for line in lines[n_header:]:
+            parts = line.strip().split("\t")
+            if len(parts) == len(columns):
+                try:
+                    row = [float(p) for p in parts]
+                    data_lines.append(row)
+                except ValueError:
+                    continue
+        df = pd.DataFrame(data_lines, columns=columns) if data_lines else pd.DataFrame()
+    else:
+        df = pd.read_csv(filepath, sep="\t", encoding="latin-1")
+
     raw_columns = df.columns.tolist()
 
+    # Rename columns to common schema
     rename_map = {}
     for orig, target in _BIOLOGIC_COL_MAP.items():
         if orig in df.columns:
             rename_map[orig] = target
     df = df.rename(columns=rename_map)
+
+    # Fuzzy matching fallback for columns not in the exact map
+    _FUZZY = {
+        "frequency_hz": ["freq"],
+        "z_real_ohm": ["re(z)", "z_real", "zreal", "z'"],
+        "z_imag_neg_ohm": ["-im(z)", "-z_imag"],
+        "z_mag_ohm": ["|z|", "z_mag"],
+        "z_phase_deg": ["phase(z)", "z_phase"],
+        "voltage_v": ["ewe", "voltage", "e/v"],
+        "current_ma": ["<i>/ma", "i/ma"],
+        "time_s": ["time/s"],
+    }
+    for target, patterns in _FUZZY.items():
+        if target in df.columns:
+            continue
+        for col in df.columns:
+            cl = col.lower().strip()
+            if any(p in cl for p in patterns):
+                df = df.rename(columns={col: target})
+                break
 
     if "current_ma" in df.columns:
         df["current_a"] = df["current_ma"] / 1000.0
@@ -252,7 +326,7 @@ def _parse_biologic_mpt(filepath: str) -> ParseResult:
         data=df,
         file_type=FileType.BIOLOGIC_MPT,
         experiment_type=exp_type,
-        metadata={},
+        metadata=metadata,
         raw_columns=raw_columns,
     )
 
@@ -479,24 +553,39 @@ _EIS_COL_PATTERNS = {
 
 
 def _parse_eis_csv(filepath: str) -> ParseResult:
-    from impedance.preprocessing import readFile
-    freq, Z = readFile(filepath)
+    # Try impedance.py's readFile first (handles many formats)
+    try:
+        from impedance.preprocessing import readFile
+        freq, Z = readFile(filepath)
+        df = pd.DataFrame({
+            "frequency_hz": freq,
+            "z_real_ohm": Z.real,
+            "z_imag_ohm": Z.imag,
+            "z_mag_ohm": np.abs(Z),
+            "z_phase_deg": np.degrees(np.arctan2(Z.imag, Z.real)),
+        })
+        if len(df) > 0:
+            return ParseResult(
+                data=df,
+                file_type=FileType.EIS_CSV,
+                experiment_type=ExperimentType.EIS,
+                metadata={},
+                raw_columns=["frequency", "Z_real", "Z_imag"],
+            )
+    except Exception:
+        pass
 
-    df = pd.DataFrame({
-        "frequency_hz": freq,
-        "z_real_ohm": Z.real,
-        "z_imag_ohm": Z.imag,
-        "z_mag_ohm": np.abs(Z),
-        "z_phase_deg": np.degrees(np.arctan2(Z.imag, Z.real)),
-    })
-
-    return ParseResult(
-        data=df,
-        file_type=FileType.EIS_CSV,
-        experiment_type=ExperimentType.EIS,
-        metadata={},
-        raw_columns=["frequency", "Z_real", "Z_imag"],
-    )
+    # Fallback: parse as generic tabular data, then map columns
+    result = _parse_generic_csv(filepath)
+    result.file_type = FileType.EIS_CSV
+    if "frequency_hz" in result.data.columns and "z_real_ohm" in result.data.columns:
+        result.experiment_type = ExperimentType.EIS
+        if "z_imag_ohm" in result.data.columns:
+            zr = result.data["z_real_ohm"]
+            zi = result.data["z_imag_ohm"]
+            result.data["z_mag_ohm"] = np.sqrt(zr**2 + zi**2)
+            result.data["z_phase_deg"] = np.degrees(np.arctan2(zi, zr))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -517,17 +606,49 @@ _GENERIC_COL_PATTERNS = {
 
 
 def _parse_generic_csv(filepath: str) -> ParseResult:
-    # Try common delimiters
-    for sep in [",", "\t", ";"]:
-        try:
-            df = pd.read_csv(filepath, sep=sep, nrows=5)
-            if len(df.columns) > 1:
-                df = pd.read_csv(filepath, sep=sep)
-                break
-        except Exception:
+    # Read raw lines to find where numeric data starts
+    with open(filepath, "r", encoding="latin-1") as f:
+        lines = f.readlines()
+
+    # Find the header line: last non-numeric line before numeric data
+    data_start = 0
+    header_line_idx = None
+    for i, line in enumerate(lines):
+        stripped = line.strip().strip('"')
+        if not stripped:
             continue
+        # Check if line is numeric data (first field parses as float)
+        parts = [p.strip().strip('"') for p in line.split(",")]
+        if len(parts) == 1:
+            parts = [p.strip().strip('"') for p in line.split("\t")]
+        try:
+            float(parts[0])
+            if data_start == 0:
+                data_start = i
+                # Header is the previous non-empty line
+                for j in range(i - 1, -1, -1):
+                    if lines[j].strip():
+                        header_line_idx = j
+                        break
+            break
+        except (ValueError, IndexError):
+            continue
+
+    # Detect delimiter from header or first data line
+    ref_line = lines[header_line_idx] if header_line_idx is not None else lines[data_start]
+    if "\t" in ref_line and ref_line.count("\t") >= ref_line.count(","):
+        sep = "\t"
+    elif "," in ref_line:
+        sep = ","
     else:
-        df = pd.read_csv(filepath)
+        sep = "\t"
+
+    skiprows = header_line_idx if header_line_idx is not None else data_start
+    try:
+        df = pd.read_csv(filepath, sep=sep, skiprows=skiprows, encoding="latin-1")
+    except Exception:
+        # Last resort: skip all header lines and read data
+        df = pd.read_csv(filepath, sep=sep, skiprows=data_start, header=None, encoding="latin-1")
 
     raw_columns = df.columns.tolist()
 

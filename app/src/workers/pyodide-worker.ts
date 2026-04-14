@@ -330,16 +330,33 @@ def parse_eis_csv(filepath):
 
 
 def parse_generic_csv(filepath):
-    for sep in [",", "\\t", ";"]:
+    with open(filepath, "r", encoding="latin-1") as f:
+        lines = f.readlines()
+    data_start = 0
+    header_idx = None
+    for i, line in enumerate(lines):
+        stripped = line.strip().strip('"')
+        if not stripped: continue
+        parts = [p.strip().strip('"') for p in line.split(",")]
+        if len(parts) == 1:
+            parts = [p.strip().strip('"') for p in line.split("\\t")]
         try:
-            df = pd.read_csv(filepath, sep=sep, nrows=5)
-            if len(df.columns) > 1:
-                df = pd.read_csv(filepath, sep=sep)
-                break
-        except:
+            float(parts[0])
+            data_start = i
+            for j in range(i - 1, -1, -1):
+                if lines[j].strip():
+                    header_idx = j
+                    break
+            break
+        except (ValueError, IndexError):
             continue
-    else:
-        df = pd.read_csv(filepath)
+    ref_line = lines[header_idx] if header_idx is not None else lines[data_start]
+    sep = "\\t" if "\\t" in ref_line and ref_line.count("\\t") >= ref_line.count(",") else ","
+    skiprows = header_idx if header_idx is not None else data_start
+    try:
+        df = pd.read_csv(filepath, sep=sep, skiprows=skiprows, encoding="latin-1")
+    except:
+        df = pd.read_csv(filepath, sep=sep, skiprows=data_start, header=None, encoding="latin-1")
     patterns = {
         "time_s": ["time", "elapsed"], "voltage_v": ["voltage", "potential", "ewe"],
         "current_a": ["current"], "capacity_ah": ["capacity", "cap"],
