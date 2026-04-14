@@ -394,11 +394,14 @@ async def parse_file(file: UploadFile = File(...)):
         data_dict = {}
         for col in df.columns:
             vals = df[col].values
-            if np.issubdtype(vals.dtype, np.floating):
-                data_dict[col] = [float(v) if np.isfinite(v) else None for v in vals]
-            elif np.issubdtype(vals.dtype, np.integer):
-                data_dict[col] = [int(v) for v in vals]
-            else:
+            try:
+                if np.issubdtype(vals.dtype, np.floating):
+                    data_dict[col] = [float(v) if np.isfinite(v) else None for v in vals]
+                elif np.issubdtype(vals.dtype, np.integer):
+                    data_dict[col] = [int(v) for v in vals]
+                else:
+                    data_dict[col] = [str(v) for v in vals]
+            except (TypeError, ValueError):
                 data_dict[col] = [str(v) for v in vals]
 
         return {
