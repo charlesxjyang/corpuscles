@@ -250,7 +250,6 @@ async def run_analysis(req: AnalysisRequest):
 
         elif req.type.startswith("drt_"):
             from pyDRTtools.runs import EIS_object, simple_run, Bayesian_run, BHT_run
-            eis = EIS_object(freq, zr, zi)
 
             method = req.type.replace("drt_", "")
             common = dict(
@@ -264,20 +263,31 @@ async def run_analysis(req: AnalysisRequest):
                 v = np.asarray(val)
                 return float(v.flat[0]) if v.size > 0 else 0.0
 
+            # Normalize impedance to avoid ill-conditioning with large Z values
+            Z_scale = float(np.mean(np.sqrt(zr**2 + zi**2)))
+            if Z_scale == 0:
+                Z_scale = 1.0
+            zr_n = zr / Z_scale
+            zi_n = zi / Z_scale
+
+            eis = EIS_object(freq, zr_n, zi_n)
+
             if method == "simple":
                 result = simple_run(
                     entry=eis, data_used=params.get("data_used", "Combined Re-Im Data"),
-                    induct_used=1, cv_type=params.get("cv_type", "GCV"),
+                    induct_used=0, cv_type=params.get("cv_type", "GCV"),
                     reg_param=params.get("reg_param", 1e-3), **common,
                 )
+                # Scale gamma back to original units
+                gamma_scaled = (np.asarray(result.gamma) * Z_scale).tolist()
                 return {
                     "type": "drt_simple",
                     "data": {
                         "method": "simple",
                         "tau": result.out_tau_vec.tolist(),
-                        "gamma": result.gamma.tolist(),
-                        "R_inf": to_float(result.R),
-                        "L": to_float(result.L),
+                        "gamma": gamma_scaled,
+                        "R_inf": to_float(result.R) * Z_scale,
+                        "L": to_float(result.L) * Z_scale,
                         "lambda_value": to_float(result.lambda_value),
                     },
                 }
@@ -285,7 +295,7 @@ async def run_analysis(req: AnalysisRequest):
             elif method == "bayesian":
                 result = Bayesian_run(
                     entry=eis, data_used=params.get("data_used", "Combined Re-Im Data"),
-                    induct_used=1, cv_type=params.get("cv_type", "GCV"),
+                    induct_used=0, cv_type=params.get("cv_type", "GCV"),
                     reg_param=params.get("reg_param", 1e-3),
                     NMC_sample=params.get("NMC_sample", 2000), **common,
                 )
@@ -294,12 +304,12 @@ async def run_analysis(req: AnalysisRequest):
                     "data": {
                         "method": "bayesian",
                         "tau": result.out_tau_vec.tolist(),
-                        "gamma": result.gamma.tolist(),
-                        "mean": result.mean.tolist(),
-                        "lower_bound": result.lower_bound.tolist(),
-                        "upper_bound": result.upper_bound.tolist(),
-                        "R_inf": to_float(result.R),
-                        "L": to_float(result.L),
+                        "gamma": (np.asarray(result.gamma) * Z_scale).tolist(),
+                        "mean": (np.asarray(result.mean) * Z_scale).tolist(),
+                        "lower_bound": (np.asarray(result.lower_bound) * Z_scale).tolist(),
+                        "upper_bound": (np.asarray(result.upper_bound) * Z_scale).tolist(),
+                        "R_inf": to_float(result.R) * Z_scale,
+                        "L": to_float(result.L) * Z_scale,
                     },
                 }
 
